@@ -10,7 +10,7 @@ enum Tools {
 }
 
 impl Tools {
-    fn to_spec(&self) -> String {
+    fn to_spec(&self) -> Value {
         match &self {
             Self::Read => json!({
                 "type": "function",
@@ -29,7 +29,6 @@ impl Tools {
                     }
                 }
             })
-            .to_string(),
         }
     }
 }
@@ -63,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tools = Tools::Read;
     let response: Value = client
         .chat()
-        .create_byot(json!({
+        .create_byot(dbg!(json!({
             "messages": [
                 {
                     "role": "user",
@@ -72,13 +71,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ],
             "tools": [tools.to_spec()],
             "model": "anthropic/claude-haiku-4.5",
-        }))
+        })))
         .await?;
 
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     eprintln!("Logs from your program will appear here!");
 
     // TODO: Uncomment the lines below to pass the first stage
+    dbg!(&response);
     if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
         println!("{}", content);
     }
