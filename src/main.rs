@@ -1,7 +1,38 @@
 use async_openai::{Client, config::OpenAIConfig};
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::{env, process};
+
+enum Tools {
+    Read,
+}
+
+impl Tools {
+    fn to_spec(&self) -> String {
+        match &self {
+            Self::Read => json!({
+                "type": "function",
+                "function": {
+                    "name": "Read",
+                    "description": "Read and return the contents of a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "The path to the file to read"
+                            }
+                        },
+                        "required": ["file_path"]
+                    }
+                }
+            })
+            .to_string(),
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -29,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::with_config(config);
 
     #[allow(unused_variables)]
+    let tools = Tools::Read;
     let response: Value = client
         .chat()
         .create_byot(json!({
@@ -38,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "content": args.prompt
                 }
             ],
+            "tools": [tools.to_spec()],
             "model": "anthropic/claude-haiku-4.5",
         }))
         .await?;
