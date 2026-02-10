@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
 use std::fs::read_to_string;
+use std::process::Command;
 use std::{env, process};
 
 const MAX_LOOP: usize = 40;
@@ -13,6 +14,7 @@ const MAX_LOOP: usize = 40;
 enum Tool {
     Read,
     Write,
+    Bash,
 }
 
 impl Tool {
@@ -56,6 +58,23 @@ impl Tool {
                       }
                   }
             }),
+            Self::Bash => json!({
+                "type": "function",
+                "function": {
+                    "name": "Bash",
+                    "description": "Execute a shell command",
+                    "parameters": {
+                        "type": "object",
+                        "required": ["command"],
+                        "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The command to execute"
+                        }
+                        }
+                    }
+                }
+            }),
         }
     }
 }
@@ -71,7 +90,7 @@ struct ToolCall {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FunctionCall {
     name: Tool,
-    //arguments: HashMap<String, String>,
+    // arguments: HashMap<String, String>,
     arguments: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<String>,
@@ -80,9 +99,10 @@ struct FunctionCall {
 impl FunctionCall {
     /// Execute a tool call
     fn execute(&self) -> String {
-        match &self.name {
+        match self.name {
             Tool::Read => self.read(),
             Tool::Write => self.write(),
+            Tool::Bash => self.bash(),
         }
     }
     fn read(&self) -> String {
@@ -99,6 +119,32 @@ impl FunctionCall {
         match fs::write(file_path, content) {
             Ok(_) => "file written succesfully".into(),
             Err(e) => format!("Error creating file: {e:?}"),
+        }
+    }
+    fn bash(&self) -> String {
+        let arguments: HashMap<String, String> = serde_json::from_str(&self.arguments).unwrap();
+        dbg!(&arguments);
+        let command = arguments.get("command").unwrap();
+        let command: Vec<String> = command.split_whitespace().map(String::from).collect();
+        match command.len() {
+            0 => "no command provided".into(),
+            1 => {
+                let cmd = Command::new(&command[0]).output().unwrap();
+                format!(
+                    "{}{}",
+                    String::from_utf8(cmd.stdout).unwrap(),
+                    String::from_utf8(cmd.stderr).unwrap()
+                )
+            }
+            _ => {
+                let (a, b) = command.split_at(1);
+                let cmd = Command::new(&a[0]).args(b).output().unwrap();
+                format!(
+                    "{}{}",
+                    String::from_utf8(cmd.stdout).unwrap(),
+                    String::from_utf8(cmd.stderr).unwrap()
+                )
+            }
         }
     }
 }
