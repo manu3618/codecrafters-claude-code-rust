@@ -3,6 +3,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::fs;
 use std::fs::read_to_string;
 use std::{env, process};
 
@@ -11,6 +12,7 @@ const MAX_LOOP: usize = 40;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum Tool {
     Read,
+    Write,
 }
 
 impl Tool {
@@ -33,6 +35,27 @@ impl Tool {
                     }
                 }
             }),
+            Self::Write => json!({
+                  "type": "function",
+                  "function": {
+                      "name": "Write",
+                      "description": "Write content to a file",
+                      "parameters": {
+                          "type": "object",
+                          "required": ["file_path", "content"],
+                          "properties": {
+                              "file_path": {
+                                  "type": "string",
+                                  "description": "The path of the file to write to"
+                              },
+                              "content": {
+                                  "type": "string",
+                                  "description": "The content to write to the file"
+                              }
+                          }
+                      }
+                  }
+            }),
         }
     }
 }
@@ -50,6 +73,8 @@ struct FunctionCall {
     name: Tool,
     //arguments: HashMap<String, String>,
     arguments: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
 }
 
 impl FunctionCall {
@@ -57,6 +82,7 @@ impl FunctionCall {
     fn execute(&self) -> String {
         match &self.name {
             Tool::Read => self.read(),
+            Tool::Write => self.write(),
         }
     }
     fn read(&self) -> String {
@@ -64,6 +90,16 @@ impl FunctionCall {
         dbg!(&arguments);
         let file_path = arguments.get("file_path").unwrap();
         read_to_string(file_path).unwrap()
+    }
+    fn write(&self) -> String {
+        let arguments: HashMap<String, String> = serde_json::from_str(&self.arguments).unwrap();
+        dbg!(&arguments);
+        let file_path = arguments.get("file_path").unwrap();
+        let content = arguments.get("content").unwrap();
+        match fs::write(file_path, content) {
+            Ok(_) => "file written succesfully".into(),
+            Err(e) => format!("Error creating file: {e:?}"),
+        }
     }
 }
 
@@ -127,6 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[allow(unused_variables)]
     let read_tool = Tool::Read;
+    let write_tool = Tool::Write;
     let init_message = Conversation {
         role: Role::User,
         content: args.prompt.into(),
@@ -135,18 +172,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     conversation_history.0.push(init_message);
     let mut query = json!({
         "messages": conversation_history.to_spec(),
-        "tools": [read_tool.to_spec()],
+        "tools": [read_tool.to_spec(), write_tool.to_spec()],
         "model": "anthropic/claude-haiku-4.5",
     });
 
     for _ in 0..MAX_LOOP {
         eprintln!(
-            "begining of the loop\n{}",
+            "---- begining of the loop\n{}",
             serde_json::to_string_pretty(&query).unwrap()
         );
         let response: Value = client.chat().create_byot(query).await?;
 
-        dbg!(&response);
         conversation_history.add_response(&response["choices"][0]["message"].to_string());
         dbg!(&conversation_history);
         if let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() {
@@ -161,7 +197,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 conversation_history.0.push(response);
             }
-            dbg!(&conversation_history);
         } else {
             if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
                 println!("{}", content);
@@ -170,7 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         query = json!({
             "messages": conversation_history.to_spec(),
-            "tools": [read_tool.to_spec()],
+            "tools": [read_tool.to_spec(), write_tool.to_spec()],
             "model": "anthropic/claude-haiku-4.5",
         });
     }
