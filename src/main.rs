@@ -140,7 +140,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     for _ in 0..MAX_LOOP {
-        eprintln!("begining of the loop\n{}", serde_json::to_string_pretty(&query).unwrap());
+        eprintln!(
+            "begining of the loop\n{}",
+            serde_json::to_string_pretty(&query).unwrap()
+        );
         let response: Value = client.chat().create_byot(query).await?;
 
         dbg!(&response);
@@ -148,10 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         dbg!(&conversation_history);
         if let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() {
             for tool_call in tool_calls {
-                // TODO: remove the ugly transofomation JSON -> String -> JSON
-                let tool_call = tool_call.to_string();
-                eprintln!("AAAA\n{}", &tool_call);
-                let tool_call: ToolCall = serde_json::from_str(&tool_call).unwrap();
+                let tool_call: ToolCall = serde_json::from_value(tool_call.clone()).unwrap();
                 dbg!(&tool_call);
                 let response = Conversation {
                     role: Role::Tool,
