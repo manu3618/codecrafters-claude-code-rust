@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::fs::read_to_string;
 use std::{env, process};
 
+const MAX_LOOP: usize = 40;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum Tool {
     Read,
@@ -65,6 +67,38 @@ impl FunctionCall {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Role {
+    #[default]
+    User,
+    Assistant,
+    Tool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct Conversation {
+    role: Role,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<ToolCall>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ConversationHistory(Vec<Conversation>);
+
+impl ConversationHistory {
+    fn add_response(&mut self, conv: &str) {
+        let response: Conversation = serde_json::from_str(conv).unwrap();
+        self.0.push(response);
+    }
+    fn to_spec(&self) -> Value {
+        json!(self.0)
+    }
+}
+
 #[derive(Parser)]
 #[command(author, version, about)]
 struct Args {
@@ -89,41 +123,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_api_key(api_key);
 
     let client = Client::with_config(config);
+    let mut conversation_history = ConversationHistory::default();
 
     #[allow(unused_variables)]
-    let tools = Tool::Read;
-    let response: Value = client
-        .chat()
-        .create_byot(json!({
-            "messages": [
-                {
-                    "role": "user",
-                    "content": args.prompt
-                }
-            ],
-            "tools": [tools.to_spec()],
+    let read_tool = Tool::Read;
+    let init_message = Conversation {
+        role: Role::User,
+        content: args.prompt.into(),
+        ..Default::default()
+    };
+    conversation_history.0.push(init_message);
+    let mut query = json!({
+        "messages": conversation_history.to_spec(),
+        "tools": [read_tool.to_spec()],
+        "model": "anthropic/claude-haiku-4.5",
+    });
+
+    for _ in 0..MAX_LOOP {
+        eprintln!("begining of the loop\n{}", serde_json::to_string_pretty(&query).unwrap());
+        let response: Value = client.chat().create_byot(query).await?;
+
+        dbg!(&response);
+        conversation_history.add_response(&response["choices"][0]["message"].to_string());
+        dbg!(&conversation_history);
+        if let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() {
+            for tool_call in tool_calls {
+                // TODO: remove the ugly transofomation JSON -> String -> JSON
+                let tool_call = tool_call.to_string();
+                eprintln!("AAAA\n{}", &tool_call);
+                let tool_call: ToolCall = serde_json::from_str(&tool_call).unwrap();
+                dbg!(&tool_call);
+                let response = Conversation {
+                    role: Role::Tool,
+                    tool_call_id: Some(tool_call.id.clone()),
+                    content: Some(tool_call.function.execute()),
+                    tool_calls: None,
+                };
+                conversation_history.0.push(response);
+            }
+            dbg!(&conversation_history);
+        } else {
+            if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
+                println!("{}", content);
+            }
+            break;
+        }
+        query = json!({
+            "messages": conversation_history.to_spec(),
+            "tools": [read_tool.to_spec()],
             "model": "anthropic/claude-haiku-4.5",
-        }))
-        .await?;
-
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    eprintln!("Logs from your program will appear here!");
-
-    // TODO: Uncomment the lines below to pass the first stage
-    dbg!(&response);
-    if let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() {
-        let tool_call = tool_calls.first().unwrap();
-        // TODO: remove the ugly transofomation JSON -> String -> JSON
-        let tool_call = tool_call.to_string();
-        eprintln!("AAAA\n{}", &tool_call);
-        let tool_call: ToolCall = serde_json::from_str(&tool_call).unwrap();
-        dbg!(&tool_call);
-        let result = tool_call.function.execute();
-        println!("{result}");
-    }
-
-    if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
-        println!("{}", content);
+        });
     }
 
     Ok(())
