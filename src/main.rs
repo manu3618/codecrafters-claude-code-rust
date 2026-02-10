@@ -210,6 +210,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[allow(unused_variables)]
     let read_tool = Tool::Read;
     let write_tool = Tool::Write;
+    let bash_tool = Tool::Bash;
     let init_message = Conversation {
         role: Role::User,
         content: args.prompt.into(),
@@ -218,7 +219,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     conversation_history.0.push(init_message);
     let mut query = json!({
         "messages": conversation_history.to_spec(),
-        "tools": [read_tool.to_spec(), write_tool.to_spec()],
+        "tools": [read_tool.to_spec(), write_tool.to_spec(), bash_tool.to_spec()],
         "model": "anthropic/claude-haiku-4.5",
     });
 
@@ -251,7 +252,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         query = json!({
             "messages": conversation_history.to_spec(),
-            "tools": [read_tool.to_spec(), write_tool.to_spec()],
+            "tools": [read_tool.to_spec(), write_tool.to_spec(), bash_tool.to_spec()],
             "model": "anthropic/claude-haiku-4.5",
         });
     }
