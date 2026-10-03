@@ -235,9 +235,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let skills = skill::get_skills(path::Path::new(".claude/skills"));
     let skill_message = Conversation::from_skills(&skills);
     conversation_history.0.push(skill_message);
+
+    let msg = if args.prompt.starts_with("/") {
+        let name = &args.prompt.split(' ').next().unwrap()[1..];
+        skills
+            .iter()
+            .filter(|s| s.frontmatter.name == name)
+            .map(|s| s.body.clone())
+            .next()
+    } else {
+        Some(args.prompt)
+    };
+
     let init_message = Conversation {
         role: Role::User,
-        content: args.prompt.into(),
+        content: msg,
         ..Default::default()
     };
     conversation_history.0.push(init_message);
