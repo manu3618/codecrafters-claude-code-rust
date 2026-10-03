@@ -1,10 +1,12 @@
 use async_openai::{Client, config::OpenAIConfig};
 use clap::Parser;
+use codecrafters_claude_code::skill;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
 use std::fs::read_to_string;
+use std::path;
 use std::process::Command;
 use std::{env, process};
 
@@ -156,6 +158,7 @@ enum Role {
     User,
     Assistant,
     Tool,
+    System,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -166,6 +169,24 @@ struct Conversation {
     content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<ToolCall>>,
+}
+
+impl Conversation {
+    fn from_skills(skills: &[skill::Skill]) -> Self {
+        let mut content = Vec::new();
+        content.push(String::from("You have access to the following skills:\n\n"));
+        content.append(
+            &mut skills
+                .iter()
+                .map(|s| format!("- {}: {}", s.frontmatter.name, s.frontmatter.description))
+                .collect(),
+        );
+        Self {
+            role: Role::System,
+            content: Some(content.join("\n")),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -211,6 +232,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let read_tool = Tool::Read;
     let write_tool = Tool::Write;
     let bash_tool = Tool::Bash;
+    let skills = skill::get_skills(path::Path::new(".claude/skills"));
+    let skill_message = Conversation::from_skills(&skills);
+    conversation_history.0.push(skill_message);
     let init_message = Conversation {
         role: Role::User,
         content: args.prompt.into(),
