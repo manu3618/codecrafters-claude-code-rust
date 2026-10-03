@@ -237,11 +237,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     conversation_history.0.push(skill_message);
 
     let msg = if args.prompt.starts_with("/") {
-        let name = &args.prompt.split(' ').next().unwrap()[1..];
+        let mut arguments = args.prompt.splitn(2, ' ');
+        let name = &arguments.next().unwrap()[1..];
+        let arguments = arguments.next().unwrap_or("");
+
         skills
             .iter()
             .filter(|s| s.frontmatter.name == name)
-            .map(|s| s.body.clone())
+            .map(|s| s.get_body(arguments))
             .next()
     } else {
         Some(args.prompt)

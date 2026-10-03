@@ -6,7 +6,7 @@ use std::str::FromStr;
 #[derive(Debug)]
 pub struct Skill {
     pub frontmatter: Frontmatter,
-    pub body: String,
+    body: String,
 }
 
 #[derive(Debug)]
@@ -33,6 +33,21 @@ impl FromStr for Skill {
         } else {
             Err(SkillParseError)
         }
+    }
+}
+
+impl Skill {
+    pub fn get_body(&self, arguments: &str) -> String {
+        let arg_list: Vec<&str> = arguments
+            .split(' ')
+            .filter(|s| !s.is_empty())
+            .collect();
+        let mut b = self.body.clone();
+        for idx in (0..arg_list.len()).rev() {
+            b = b.replace(format!("$ARGUMENT[{}]", idx).as_str(), arg_list[idx]);
+            b = b.replace(format!("${}", idx).as_str(), arg_list[idx]);
+        }
+        b.replace("$ARGUMENTS", arguments)
     }
 }
 
