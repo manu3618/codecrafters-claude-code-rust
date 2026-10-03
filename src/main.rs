@@ -236,26 +236,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let skill_message = Conversation::from_skills(&skills);
     conversation_history.0.push(skill_message);
 
-    let msg = if args.prompt.starts_with("/") {
-        let mut arguments = args.prompt.splitn(2, ' ');
-        let name = &arguments.next().unwrap()[1..];
-        let arguments = arguments.next().unwrap_or("");
-
-        skills
-            .iter()
-            .filter(|s| s.frontmatter.name == name)
-            .map(|s| s.get_body(arguments))
-            .next()
+    let mut active_skills = Vec::new();
+    let mut arguments = args.prompt.split(' ');
+    let mut skill_arguments = String::new();
+    while let Some(c) = arguments.next() {
+        if let Some(name) = c.strip_prefix("/") {
+            active_skills.push(skills.iter().find(|s| s.frontmatter.name == name).unwrap())
+        } else {
+            skill_arguments = format!("{c} ") + &arguments.clone().collect::<Vec<_>>().join(" ");
+            break;
+        }
+    }
+    if active_skills.is_empty() {
+        conversation_history.0.push(Conversation {
+            role: Role::User,
+            content: Some(skill_arguments.clone()),
+            ..Default::default()
+        })
     } else {
-        Some(args.prompt)
-    };
+        for skill in active_skills {
+            conversation_history.0.push(Conversation {
+                role: Role::User,
+                content: Some(skill.get_body(&skill_arguments.clone())),
+                ..Default::default()
+            })
+        }
+    }
 
-    let init_message = Conversation {
-        role: Role::User,
-        content: msg,
-        ..Default::default()
-    };
-    conversation_history.0.push(init_message);
     let mut query = json!({
         "messages": conversation_history.to_spec(),
         "tools": [read_tool.to_spec(), write_tool.to_spec(), bash_tool.to_spec()],

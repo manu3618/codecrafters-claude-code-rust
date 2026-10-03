@@ -38,10 +38,7 @@ impl FromStr for Skill {
 
 impl Skill {
     pub fn get_body(&self, arguments: &str) -> String {
-        let arg_list: Vec<&str> = arguments
-            .split(' ')
-            .filter(|s| !s.is_empty())
-            .collect();
+        let arg_list: Vec<&str> = arguments.split(' ').filter(|s| !s.is_empty()).collect();
         let mut b = self.body.clone();
         for idx in (0..arg_list.len()).rev() {
             b = b.replace(format!("$ARGUMENT[{}]", idx).as_str(), arg_list[idx]);
