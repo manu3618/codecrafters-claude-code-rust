@@ -257,7 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for skill in active_skills {
             conversation_history.0.push(Conversation {
                 role: Role::User,
-                content: Some(skill.get_body(&skill_arguments.clone())),
+                content: Some(skill.get_bundled_body(&skill_arguments.clone())),
                 ..Default::default()
             })
         }

@@ -3,10 +3,11 @@ use std::fs;
 use std::path;
 use std::str::FromStr;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Skill {
     pub frontmatter: Frontmatter,
     body: String,
+    folder: Option<path::PathBuf>,
 }
 
 #[derive(Debug)]
@@ -29,6 +30,7 @@ impl FromStr for Skill {
             Ok(Self {
                 frontmatter: Frontmatter::from_str(frontmatter)?,
                 body: body.trim().into(),
+                ..Default::default()
             })
         } else {
             Err(SkillParseError)
@@ -37,7 +39,31 @@ impl FromStr for Skill {
 }
 
 impl Skill {
-    pub fn get_body(&self, arguments: &str) -> String {
+    pub fn get_bundled_body(&self, arguments: &str) -> String {
+        let body = self.get_body(arguments);
+        let refered = ["scripts/", "references/", "assets/"]
+            .iter()
+            .any(|x| body.contains(x));
+        if let Some(ref p) = self.folder
+            && refered
+        {
+            let mut b = String::new();
+            b.push_str(
+                format!(
+                    "Skill: {} (located at {})",
+                    self.frontmatter.name,
+                    p.as_os_str().to_str().unwrap()
+                )
+                .as_str(),
+            );
+            b.push_str("\nPaths in the instructions below are relative to that folder.\n\n");
+            b.push_str(body.as_str());
+            b
+        } else {
+            body
+        }
+    }
+    fn get_body(&self, arguments: &str) -> String {
         let arg_list: Vec<&str> = arguments.split(' ').filter(|s| !s.is_empty()).collect();
         let mut b = self.body.clone();
         for idx in (0..arg_list.len()).rev() {
@@ -48,7 +74,7 @@ impl Skill {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Frontmatter {
     pub name: String,
     pub description: String,
@@ -118,6 +144,7 @@ pub fn get_skills(folder: &path::Path) -> Vec<Skill> {
                     .to_str()
                     .unwrap()
                     .into();
+                s.folder = Some(p.into());
                 Some(s)
             } else {
                 None
