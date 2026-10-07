@@ -3,7 +3,7 @@ use std::fs;
 use std::path;
 use std::str::FromStr;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Skill {
     pub frontmatter: Frontmatter,
     body: String,
@@ -74,7 +74,7 @@ impl Skill {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Frontmatter {
     pub name: String,
     pub description: String,

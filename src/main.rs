@@ -17,6 +17,7 @@ enum Tool {
     Read,
     Write,
     Bash,
+    Skill,
 }
 
 impl Tool {
@@ -77,6 +78,21 @@ impl Tool {
                     }
                 }
             }),
+            Self::Skill => json!({
+                "type": "function",
+                "function": {
+                    "name": "Skill",
+                    "description": "Load a skill's instructions into the conversation",
+                    "parameters": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                            "name": { "type": "string", "description": "The name of the skill to use" },
+                            "args": { "type": "string", "description": "Optional arguments for the skill" }
+                        }
+                    }
+                }
+            }),
         }
     }
 }
@@ -96,6 +112,9 @@ struct FunctionCall {
     arguments: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<String>,
+    /// list of active skills
+    #[serde(skip_serializing, skip_deserializing)]
+    active_skills: Vec<skill::Skill>,
 }
 
 impl FunctionCall {
@@ -105,6 +124,7 @@ impl FunctionCall {
             Tool::Read => self.read(),
             Tool::Write => self.write(),
             Tool::Bash => self.bash(),
+            Tool::Skill => self.skill(),
         }
     }
     fn read(&self) -> String {
@@ -149,6 +169,19 @@ impl FunctionCall {
             }
         }
     }
+    fn skill(&self) -> String {
+        let arguments: HashMap<String, String> = serde_json::from_str(&self.arguments).unwrap();
+        dbg!(&arguments);
+        let name = arguments.get("name").unwrap();
+        let b = String::from("");
+        let args = arguments.get("args").unwrap_or(&b);
+        self.active_skills
+            .iter()
+            .filter(|s| s.frontmatter.name == *name)
+            .map(|s| s.get_bundled_body(&args.clone()))
+            .next()
+            .unwrap()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -180,6 +213,13 @@ impl Conversation {
                 .iter()
                 .map(|s| format!("- {}: {}", s.frontmatter.name, s.frontmatter.description))
                 .collect(),
+        );
+        content.push(
+            concat!(
+                "\nIf a skill matches the user's request, call the Skill tool ",
+                "with its name and follow the instructions it returns."
+            )
+            .to_string(),
         );
         Self {
             role: Role::System,
@@ -232,6 +272,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let read_tool = Tool::Read;
     let write_tool = Tool::Write;
     let bash_tool = Tool::Bash;
+    let skill_tool = Tool::Skill;
     let skills = skill::get_skills(path::Path::new(".claude/skills"));
     let skill_message = Conversation::from_skills(&skills);
     conversation_history.0.push(skill_message);
@@ -254,7 +295,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         })
     } else {
-        for skill in active_skills {
+        for skill in &active_skills {
             conversation_history.0.push(Conversation {
                 role: Role::User,
                 content: Some(skill.get_bundled_body(&skill_arguments.clone())),
@@ -265,7 +306,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut query = json!({
         "messages": conversation_history.to_spec(),
-        "tools": [read_tool.to_spec(), write_tool.to_spec(), bash_tool.to_spec()],
+        "tools": [read_tool.to_spec(), write_tool.to_spec(), bash_tool.to_spec(),skill_tool.to_spec()],
         "model": "anthropic/claude-haiku-4.5",
     });
 
@@ -280,7 +321,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         dbg!(&conversation_history);
         if let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() {
             for tool_call in tool_calls {
-                let tool_call: ToolCall = serde_json::from_value(tool_call.clone()).unwrap();
+                let mut tool_call: ToolCall = serde_json::from_value(tool_call.clone()).unwrap();
+                tool_call.function.active_skills = skills.clone();
                 dbg!(&tool_call);
                 let response = Conversation {
                     role: Role::Tool,
