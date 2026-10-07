@@ -147,27 +147,38 @@ impl FunctionCall {
         let arguments: HashMap<String, String> = serde_json::from_str(&self.arguments).unwrap();
         dbg!(&arguments);
         let command = arguments.get("command").unwrap();
-        let command: Vec<String> = command.split_whitespace().map(String::from).collect();
-        match command.len() {
-            0 => "no command provided".into(),
-            1 => {
-                let cmd = Command::new(&command[0]).output().unwrap();
-                format!(
-                    "{}{}",
-                    String::from_utf8(cmd.stdout).unwrap(),
-                    String::from_utf8(cmd.stderr).unwrap()
-                )
-            }
-            _ => {
-                let (a, b) = command.split_at(1);
-                let cmd = Command::new(&a[0]).args(b).output().unwrap();
-                format!(
-                    "{}{}",
-                    String::from_utf8(cmd.stdout).unwrap(),
-                    String::from_utf8(cmd.stderr).unwrap()
-                )
-            }
-        }
+        dbg!(&command);
+        let cmd = Command::new("bash")
+            .arg("-c")
+            .arg(command)
+            .output()
+            .unwrap();
+        format!(
+            "{}{}",
+            String::from_utf8(cmd.stdout).unwrap(),
+            String::from_utf8(cmd.stderr).unwrap()
+        )
+        //  let command: Vec<String> = command.split_whitespace().map(String::from).collect();
+        //  match command.len() {
+        //      0 => "no command provided".into(),
+        //      1 => {
+        //          let cmd = Command::new(&command[0]).output().unwrap();
+        //          format!(
+        //              "{}{}",
+        //              String::from_utf8(cmd.stdout).unwrap(),
+        //              String::from_utf8(cmd.stderr).unwrap()
+        //          )
+        //      }
+        //      _ => {
+        //          let (a, b) = command.split_at(1);
+        //          let cmd = Command::new(&a[0]).args(b).output().unwrap();
+        //          format!(
+        //              "{}{}",
+        //              String::from_utf8(cmd.stdout).unwrap(),
+        //              String::from_utf8(cmd.stderr).unwrap()
+        //          )
+        //      }
+        //  }
     }
     fn skill(&self) -> String {
         let arguments: HashMap<String, String> = serde_json::from_str(&self.arguments).unwrap();
