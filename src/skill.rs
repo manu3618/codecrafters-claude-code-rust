@@ -78,6 +78,7 @@ impl Skill {
 pub struct Frontmatter {
     pub name: String,
     pub description: String,
+    pub context: Option<String>,
 }
 
 impl fmt::Display for Frontmatter {
@@ -92,6 +93,7 @@ impl FromStr for Frontmatter {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut name = String::new();
         let mut description = String::new();
+        let mut context = Default::default();
         for line in s.lines() {
             if line.is_empty() {
                 continue;
@@ -102,6 +104,8 @@ impl FromStr for Frontmatter {
                     name = String::from(content.trim());
                 } else if key == "description" {
                     description = String::from(content.trim());
+                } else if key == "context" {
+                    context = Some(content.into())
                 } else {
                     dbg!("unknown frontmatter key");
                     dbg!(key);
@@ -113,7 +117,11 @@ impl FromStr for Frontmatter {
                 return Err(SkillParseError);
             }
         }
-        Ok(Self { name, description })
+        Ok(Self {
+            name,
+            description,
+            context,
+        })
     }
 }
 
