@@ -7,12 +7,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::read_to_string;
 use std::path;
+use std::any::Any;
 use std::process::Command;
 use std::{env, process};
 
 const MAX_LOOP: usize = 40;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 enum Tool {
     Read,
     Write,
@@ -115,6 +116,9 @@ struct FunctionCall {
     /// list of active skills
     #[serde(skip_serializing, skip_deserializing)]
     active_skills: Vec<skill::Skill>,
+    /// config used for running agent, if any
+    #[serde(skip_serializing, skip_deserializing)]
+    agent_config: Option<OpenAIConfig>,
 }
 
 impl FunctionCall {
@@ -165,12 +169,24 @@ impl FunctionCall {
         let name = arguments.get("name").unwrap();
         let b = String::from("");
         let args = arguments.get("args").unwrap_or(&b);
-        self.active_skills
+        let selected_skill = self
+            .active_skills
             .iter()
             .filter(|s| s.frontmatter.name == *name)
-            .map(|s| s.get_bundled_body(&args.clone()))
             .next()
-            .unwrap()
+            .unwrap();
+        let body = selected_skill.get_bundled_body(&args.clone());
+        if selected_skill.frontmatter.context.is_none() {
+            return body;
+        }
+
+        // TODO:
+        // 1. create an (sub)agent
+        // 2. give skill body as first message
+        // 3. get subagent's last answer and return it
+        dbg!(selected_skill);
+        dbg!(&self.agent_config);
+        todo!("subagent")
     }
 }
 
@@ -241,7 +257,7 @@ struct Agent<C: async_openai::config::Config> {
 
 impl<C> Agent<C>
 where
-    C: async_openai::config::Config,
+    C: async_openai::config::Config + 'static,
 {
     fn with_config(&self, config: C) -> Self {
         let client = Client::with_config(config);
@@ -293,8 +309,7 @@ where
     }
 
     /// Run agentic loop updating conversation.
-    async fn run_agent_loop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // TODO: put all agent loop here
+    async fn run_agent_loop(&mut self) -> Result<String, Box<dyn std::error::Error>> {
         #[allow(unused_variables)]
         let read_tool = Tool::Read;
         let write_tool = Tool::Write;
@@ -329,6 +344,11 @@ where
                     let mut tool_call: ToolCall =
                         serde_json::from_value(tool_call.clone()).unwrap();
                     tool_call.function.active_skills = self.skills.clone();
+                    if tool_call.function.name == Tool::Skill {
+                        let c = self.client.config();
+                        let c = (c as &dyn Any).downcast_ref::<OpenAIConfig>();
+                        tool_call.function.agent_config = c.cloned()
+                    }
                     dbg!(&tool_call);
                     let response = Conversation {
                         role: Role::Tool,
@@ -340,7 +360,7 @@ where
                 }
             } else {
                 if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
-                    println!("{}", content);
+                    return Ok(String::from(content));
                 }
                 break;
             }
@@ -355,7 +375,7 @@ where
                 "model": "anthropic/claude-haiku-4.5",
             });
         }
-        Ok(())
+        unreachable!("loop should have ended before");
     }
 }
 
@@ -384,5 +404,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut agent = Agent::default().with_config(config);
     agent.add_user_message(args.prompt);
-    agent.run_agent_loop().await
+    println!("{}", agent.run_agent_loop().await?);
+    Ok(())
 }
