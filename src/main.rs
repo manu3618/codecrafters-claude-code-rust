@@ -232,6 +232,133 @@ impl ConversationHistory {
     }
 }
 
+#[derive(Default)]
+struct Agent<C: async_openai::config::Config> {
+    client: Client<C>,
+    skills: Vec<skill::Skill>,
+    conversation_history: ConversationHistory,
+}
+
+impl<C> Agent<C>
+where
+    C: async_openai::config::Config,
+{
+    fn with_config(&self, config: C) -> Self {
+        let client = Client::with_config(config);
+        let skills = skill::get_skills(path::Path::new(".claude/skills"));
+        let skill_message = Conversation::from_skills(&skills);
+        let mut conversation_history = self.conversation_history.clone();
+        conversation_history.0.push(skill_message);
+        Self {
+            client,
+            skills,
+            conversation_history,
+        }
+    }
+
+    /// Add user message to conversation
+    fn add_user_message(&mut self, args: String) {
+        let mut active_skills = Vec::new();
+        let mut arguments = args.split(' ');
+        let mut skill_arguments = String::new();
+        while let Some(c) = arguments.next() {
+            if let Some(name) = c.strip_prefix("/") {
+                active_skills.push(
+                    self.skills
+                        .iter()
+                        .find(|s| s.frontmatter.name == name)
+                        .unwrap(),
+                )
+            } else {
+                skill_arguments =
+                    format!("{c} ") + &arguments.clone().collect::<Vec<_>>().join(" ");
+                break;
+            }
+        }
+        if active_skills.is_empty() {
+            self.conversation_history.0.push(Conversation {
+                role: Role::User,
+                content: Some(skill_arguments.clone()),
+                ..Default::default()
+            })
+        } else {
+            for skill in &active_skills {
+                self.conversation_history.0.push(Conversation {
+                    role: Role::User,
+                    content: Some(skill.get_bundled_body(&skill_arguments.clone())),
+                    ..Default::default()
+                })
+            }
+        }
+    }
+
+    /// Run agentic loop updating conversation.
+    async fn run_agent_loop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // TODO: put all agent loop here
+        #[allow(unused_variables)]
+        let read_tool = Tool::Read;
+        let write_tool = Tool::Write;
+        let bash_tool = Tool::Bash;
+        let skill_tool = Tool::Skill;
+        let skill_message = Conversation::from_skills(&self.skills);
+        self.conversation_history.0.push(skill_message);
+
+        let mut query = json!({
+            "messages": self.conversation_history.to_spec(),
+            "tools": [
+                read_tool.to_spec(),
+                write_tool.to_spec(),
+                bash_tool.to_spec(),
+                skill_tool.to_spec()
+            ],
+            "model": "anthropic/claude-haiku-4.5",
+        });
+
+        for _ in 0..MAX_LOOP {
+            eprintln!(
+                "---- begining of the loop\n{}",
+                serde_json::to_string_pretty(&query).unwrap()
+            );
+            let response: Value = self.client.chat().create_byot(query).await?;
+
+            self.conversation_history
+                .add_response(&response["choices"][0]["message"].to_string());
+            dbg!(&self.conversation_history);
+            if let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() {
+                for tool_call in tool_calls {
+                    let mut tool_call: ToolCall =
+                        serde_json::from_value(tool_call.clone()).unwrap();
+                    tool_call.function.active_skills = self.skills.clone();
+                    dbg!(&tool_call);
+                    let response = Conversation {
+                        role: Role::Tool,
+                        tool_call_id: Some(tool_call.id.clone()),
+                        content: Some(tool_call.function.execute()),
+                        tool_calls: None,
+                    };
+                    self.conversation_history.0.push(response);
+                }
+            } else {
+                if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
+                    println!("{}", content);
+                }
+                break;
+            }
+            query = json!({
+                "messages": &self.conversation_history.to_spec(),
+                "tools": [
+                    read_tool.to_spec(),
+                    write_tool.to_spec(),
+                    bash_tool.to_spec(),
+                    skill_tool.to_spec()
+                ],
+                "model": "anthropic/claude-haiku-4.5",
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Parser)]
 #[command(author, version, about)]
 struct Args {
@@ -255,85 +382,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_api_base(base_url)
         .with_api_key(api_key);
 
-    let client = Client::with_config(config);
-    let mut conversation_history = ConversationHistory::default();
-
-    #[allow(unused_variables)]
-    let read_tool = Tool::Read;
-    let write_tool = Tool::Write;
-    let bash_tool = Tool::Bash;
-    let skill_tool = Tool::Skill;
-    let skills = skill::get_skills(path::Path::new(".claude/skills"));
-    let skill_message = Conversation::from_skills(&skills);
-    conversation_history.0.push(skill_message);
-
-    let mut active_skills = Vec::new();
-    let mut arguments = args.prompt.split(' ');
-    let mut skill_arguments = String::new();
-    while let Some(c) = arguments.next() {
-        if let Some(name) = c.strip_prefix("/") {
-            active_skills.push(skills.iter().find(|s| s.frontmatter.name == name).unwrap())
-        } else {
-            skill_arguments = format!("{c} ") + &arguments.clone().collect::<Vec<_>>().join(" ");
-            break;
-        }
-    }
-    if active_skills.is_empty() {
-        conversation_history.0.push(Conversation {
-            role: Role::User,
-            content: Some(skill_arguments.clone()),
-            ..Default::default()
-        })
-    } else {
-        for skill in &active_skills {
-            conversation_history.0.push(Conversation {
-                role: Role::User,
-                content: Some(skill.get_bundled_body(&skill_arguments.clone())),
-                ..Default::default()
-            })
-        }
-    }
-
-    let mut query = json!({
-        "messages": conversation_history.to_spec(),
-        "tools": [read_tool.to_spec(), write_tool.to_spec(), bash_tool.to_spec(),skill_tool.to_spec()],
-        "model": "anthropic/claude-haiku-4.5",
-    });
-
-    for _ in 0..MAX_LOOP {
-        eprintln!(
-            "---- begining of the loop\n{}",
-            serde_json::to_string_pretty(&query).unwrap()
-        );
-        let response: Value = client.chat().create_byot(query).await?;
-
-        conversation_history.add_response(&response["choices"][0]["message"].to_string());
-        dbg!(&conversation_history);
-        if let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() {
-            for tool_call in tool_calls {
-                let mut tool_call: ToolCall = serde_json::from_value(tool_call.clone()).unwrap();
-                tool_call.function.active_skills = skills.clone();
-                dbg!(&tool_call);
-                let response = Conversation {
-                    role: Role::Tool,
-                    tool_call_id: Some(tool_call.id.clone()),
-                    content: Some(tool_call.function.execute()),
-                    tool_calls: None,
-                };
-                conversation_history.0.push(response);
-            }
-        } else {
-            if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
-                println!("{}", content);
-            }
-            break;
-        }
-        query = json!({
-            "messages": conversation_history.to_spec(),
-            "tools": [read_tool.to_spec(), write_tool.to_spec(), bash_tool.to_spec()],
-            "model": "anthropic/claude-haiku-4.5",
-        });
-    }
-
-    Ok(())
+    let mut agent = Agent::default().with_config(config);
+    agent.add_user_message(args.prompt);
+    agent.run_agent_loop().await
 }
